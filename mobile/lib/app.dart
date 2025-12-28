@@ -12,7 +12,6 @@ import 'widgets/app_layout_switcher.dart';
 import 'widgets/session_error_banner.dart';
 
 final appCtrl = AppCtrl();
-late final toolStatusCtrl = ToolStatusCtrl(room: appCtrl.room);
 
 class CaalApp extends StatelessWidget {
   const CaalApp({super.key});
@@ -59,41 +58,51 @@ class CaalApp extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext ctx) => MultiProvider(
-        providers: [
-          ChangeNotifierProvider.value(value: appCtrl),
-          ChangeNotifierProvider<sdk.Session>.value(value: appCtrl.session),
-          ChangeNotifierProvider<components.RoomContext>.value(value: appCtrl.roomContext),
-          ChangeNotifierProvider<ToolStatusCtrl>.value(value: toolStatusCtrl),
-        ],
-        child: components.SessionContext(
-          session: appCtrl.session,
-          child: MaterialApp(
-            title: 'CAAL',
-            theme: buildTheme(isLight: true),
-            darkTheme: buildTheme(isLight: false),
-            themeMode: ThemeMode.dark,
-            home: Builder(
-              builder: (ctx) => Center(
-                child: Container(
-                  constraints: BoxConstraints(maxWidth: 620),
-                  child: Stack(
-                    children: [
-                      Selector<AppCtrl, AppScreenState>(
-                        selector: (ctx, appCtx) => appCtx.appScreenState,
-                        builder: (ctx, screen, _) => AppLayoutSwitcher(
-                          frontBuilder: (ctx) => const WelcomeScreen(),
-                          backBuilder: (ctx) => const AgentScreen(),
-                          isFront: screen == AppScreenState.welcome,
+  Widget build(BuildContext ctx) => ChangeNotifierProvider.value(
+        value: appCtrl,
+        child: Consumer<AppCtrl>(
+          builder: (ctx, appCtrl, _) {
+            // Use sessionKey to force rebuild when session objects are recreated
+            final toolStatusCtrl = ToolStatusCtrl(room: appCtrl.room);
+
+            return MultiProvider(
+              key: ValueKey(appCtrl.sessionKey),
+              providers: [
+                ChangeNotifierProvider<sdk.Session>.value(value: appCtrl.session),
+                ChangeNotifierProvider<components.RoomContext>.value(value: appCtrl.roomContext),
+                ChangeNotifierProvider<ToolStatusCtrl>.value(value: toolStatusCtrl),
+              ],
+              child: components.SessionContext(
+                session: appCtrl.session,
+                child: MaterialApp(
+                  title: 'CAAL',
+                  theme: buildTheme(isLight: true),
+                  darkTheme: buildTheme(isLight: false),
+                  themeMode: ThemeMode.dark,
+                  home: Builder(
+                    builder: (ctx) => Center(
+                      child: Container(
+                        constraints: BoxConstraints(maxWidth: 620),
+                        child: Stack(
+                          children: [
+                            Selector<AppCtrl, AppScreenState>(
+                              selector: (ctx, appCtx) => appCtx.appScreenState,
+                              builder: (ctx, screen, _) => AppLayoutSwitcher(
+                                frontBuilder: (ctx) => const WelcomeScreen(),
+                                backBuilder: (ctx) => const AgentScreen(),
+                                isFront: screen == AppScreenState.welcome,
+                              ),
+                            ),
+                            const SessionErrorBanner(),
+                          ],
                         ),
                       ),
-                      const SessionErrorBanner(),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       );
 }

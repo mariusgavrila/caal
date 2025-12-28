@@ -29,10 +29,15 @@ class AppCtrl extends ChangeNotifier {
   final messageCtrl = TextEditingController();
   final messageFocusNode = FocusNode();
 
-  // Session objects - created once, reused across connect/disconnect
-  late final sdk.Room room = sdk.Room(roomOptions: const sdk.RoomOptions(enableVisualizer: true));
-  late final roomContext = components.RoomContext(room: room);
-  late final sdk.Session session = _createSession();
+  // Session objects - can be recreated if native resources are disposed
+  sdk.Room _room = sdk.Room(roomOptions: const sdk.RoomOptions(enableVisualizer: true));
+  late components.RoomContext _roomContext = components.RoomContext(room: _room);
+  late sdk.Session _session = _createSession();
+
+  // Public getters for current instances
+  sdk.Room get room => _room;
+  components.RoomContext get roomContext => _roomContext;
+  sdk.Session get session => _session;
 
   // Wake word detection
   late final WakeWordService wakeWordService;
@@ -49,8 +54,58 @@ class AppCtrl extends ChangeNotifier {
   sdk.Session _createSession() {
     return sdk.Session.fromConfigurableTokenSource(
       createCaalTokenSource(_caalServerUrl).cached(),
-      options: sdk.SessionOptions(room: room),
+      options: sdk.SessionOptions(room: _room),
     );
+  }
+
+  /// Tracks if session objects need recreation
+  bool _needsRecreation = false;
+
+  /// Key that changes when session objects are recreated, forcing widget rebuild
+  int sessionKey = 0;
+
+  /// Mark session objects as needing recreation (called on error)
+  void _markNeedsRecreation() {
+    _needsRecreation = true;
+  }
+
+  /// Recreate all session objects (Room, RoomContext, Session).
+  /// Called when native resources have been disposed (e.g., app swiped away).
+  Future<void> _recreateSessionObjects() async {
+    if (!_needsRecreation) return;
+
+    _logger.info('Recreating session objects...');
+
+    // Remove listener from old session
+    _session.removeListener(_handleSessionChange);
+
+    // Dispose old objects (ignore errors - they may already be disposed)
+    try {
+      await _session.dispose();
+    } catch (e) {
+      _logger.fine('Session dispose error (expected): $e');
+    }
+    try {
+      await _room.dispose();
+    } catch (e) {
+      _logger.fine('Room dispose error (expected): $e');
+    }
+    try {
+      _roomContext.dispose();
+    } catch (e) {
+      _logger.fine('RoomContext dispose error (expected): $e');
+    }
+
+    // Create fresh objects
+    _room = sdk.Room(roomOptions: const sdk.RoomOptions(enableVisualizer: true));
+    _roomContext = components.RoomContext(room: _room);
+    _session = _createSession();
+    _session.addListener(_handleSessionChange);
+
+    _needsRecreation = false;
+    sessionKey++; // Increment to force widget rebuild
+    _logger.info('Session objects recreated (key: $sessionKey)');
+    notifyListeners();
   }
 
   bool isSendButtonEnabled = false;
@@ -91,10 +146,10 @@ class AppCtrl extends ChangeNotifier {
     _hasCleanedUp = true;
 
     await wakeWordService.dispose();
-    session.removeListener(_handleSessionChange);
-    await session.dispose();
-    await room.dispose();
-    roomContext.dispose();
+    _session.removeListener(_handleSessionChange);
+    await _session.dispose();
+    await _room.dispose();
+    _roomContext.dispose();
     messageCtrl.dispose();
     messageFocusNode.dispose();
   }
@@ -144,14 +199,37 @@ class AppCtrl extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await session.start();
-      if (session.connectionState == sdk.ConnectionState.connected) {
+      await _session.start();
+      if (_session.connectionState == sdk.ConnectionState.connected) {
         appScreenState = AppScreenState.agent;
         WakelockPlus.enable();
         notifyListeners();
       }
     } catch (error, stackTrace) {
-      _logger.severe('Connection error: $error', error, stackTrace);
+      final errorStr = error.toString();
+
+      // Check if this is a disposed MediaStreamTrack error
+      if (errorStr.contains('disposed') || errorStr.contains('MediaStreamTrack')) {
+        _logger.warning('Native resources disposed, marking for recreation...');
+        _markNeedsRecreation();
+        await _recreateSessionObjects();
+
+        // Retry connection with fresh objects
+        try {
+          await _session.start();
+          if (_session.connectionState == sdk.ConnectionState.connected) {
+            appScreenState = AppScreenState.agent;
+            WakelockPlus.enable();
+            notifyListeners();
+            return;
+          }
+        } catch (retryError, retryStack) {
+          _logger.severe('Retry connection error: $retryError', retryError, retryStack);
+        }
+      } else {
+        _logger.severe('Connection error: $error', error, stackTrace);
+      }
+
       appScreenState = AppScreenState.welcome;
       notifyListeners();
     } finally {
@@ -172,7 +250,7 @@ class AppCtrl extends ChangeNotifier {
   }
 
   void _handleSessionChange() {
-    final sdk.ConnectionState state = session.connectionState;
+    final sdk.ConnectionState state = _session.connectionState;
     AppScreenState? nextScreen;
     switch (state) {
       case sdk.ConnectionState.connected:
