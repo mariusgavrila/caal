@@ -68,6 +68,8 @@ logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 logging.getLogger("mcp").setLevel(logging.WARNING)  # MCP client SSE/JSON-RPC spam
 logging.getLogger("livekit").setLevel(logging.WARNING)  # LiveKit internal logs
 logging.getLogger("livekit_api").setLevel(logging.WARNING)  # Rust bridge logs
+logging.getLogger("livekit.agents.voice").setLevel(logging.WARNING)  # Suppress segment sync warnings
+logging.getLogger("livekit.plugins.openai.tts").setLevel(logging.WARNING)  # Suppress "no request_id" spam
 logging.getLogger("caal").setLevel(logging.INFO)  # Our package - INFO level
 
 # =============================================================================
@@ -245,14 +247,6 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         api_key="not-needed",  # Speaches doesn't require auth
         model=WHISPER_MODEL,
     )
-    # Wrap the base STT's stream method to trace calls
-    _original_stream = base_stt.stream
-    def _traced_stream(*args, **kwargs):
-        import traceback
-        logger.info("openai.STT.stream() called directly!")
-        logger.info(f"Call stack:\n{''.join(traceback.format_stack()[:10])}")
-        return _original_stream(*args, **kwargs)
-    base_stt.stream = _traced_stream
 
     # Load wake word settings
     all_settings = settings_module.load_settings()
@@ -271,18 +265,32 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         wake_greetings = all_settings.get("wake_greetings", ["Hey, what's up?"])
 
         async def on_wake_detected():
-            """Trigger wake greeting when wake word detected."""
+            """Play wake greeting directly via TTS, bypassing agent turn-taking."""
             nonlocal _session_ref
             if _session_ref is None:
-                logger.warning("Wake word detected but session not ready")
+                logger.warning("Wake detected but session not ready yet")
                 return
 
-            greeting = random.choice(wake_greetings)
-            logger.info(f"Wake word detected! Saying: {greeting}")
             try:
-                await _session_ref.say(greeting)
+                # Pick a random greeting
+                greeting = random.choice(wake_greetings)
+                logger.info(f"Wake word detected, playing greeting: {greeting}")
+
+                # Get TTS and audio output from session
+                tts = _session_ref.tts
+                audio_output = _session_ref.output.audio
+
+                # Synthesize and push audio frames directly (bypasses turn-taking)
+                audio_stream = tts.synthesize(greeting)
+                async for event in audio_stream:
+                    if hasattr(event, "frame") and event.frame:
+                        await audio_output.capture_frame(event.frame)
+
+                # Flush to complete the audio segment
+                audio_output.flush()
+
             except Exception as e:
-                logger.warning(f"Failed to say wake greeting: {e}")
+                logger.warning(f"Failed to play wake greeting: {e}")
 
         async def on_state_changed(state):
             """Publish wake word state to connected clients."""

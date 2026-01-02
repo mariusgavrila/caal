@@ -80,7 +80,6 @@ class WakeWordGatedSTT(STT):
             on_wake_detected: Callback when wake word is detected (e.g., trigger greeting).
             on_state_changed: Callback when state changes (for publishing to clients).
         """
-        logger.info(f"WakeWordGatedSTT.__init__ called - inner_stt={type(inner_stt).__name__}")
         # Override capabilities to indicate we support streaming
         # Even though the inner STT may not support streaming, WE provide streaming
         # by gating audio through wake word detection before forwarding to inner STT
@@ -133,7 +132,6 @@ class WakeWordGatedSTT(STT):
         language: NotGivenOr[str] = NOT_GIVEN,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> RecognizeStream:
-        logger.info(">>> WakeWordGatedSTT.stream() CALLED <<<")
         return WakeWordGatedStream(
             stt=self,
             inner_stt=self._inner,
@@ -211,7 +209,6 @@ class WakeWordGatedStream(RecognizeStream):
 
     async def _run(self) -> None:
         """Main processing loop."""
-        logger.info("WakeWordGatedStream._run() started")
 
         # Create StreamAdapter to wrap the non-streaming STT with VAD
         vad = silero.VAD.load()
@@ -315,19 +312,20 @@ class WakeWordGatedStream(RecognizeStream):
 
             for model_name, score in predictions.items():
                 if score >= self._threshold:
+                    detect_time = time.time()
                     logger.info(
                         f"Wake word detected! model={model_name}, score={score:.3f}"
                     )
 
+                    # Trigger wake callback FIRST (e.g., greeting) - fire and forget
+                    # Do this before state change to minimize latency
+                    if self._on_wake_detected:
+                        asyncio.create_task(self._on_wake_detected())
+                        # Yield to event loop so the task can start immediately
+                        await asyncio.sleep(0)
+
                     # Switch to active mode
                     await self._set_state(WakeWordState.ACTIVE)
-                    self._last_speech_time = time.time()
-
-                    # Trigger wake callback (e.g., greeting)
-                    if self._on_wake_detected:
-                        try:
-                            await self._on_wake_detected()
-                        except Exception as e:
-                            logger.warning(f"Error in on_wake_detected callback: {e}")
+                    self._last_speech_time = detect_time
 
                     return

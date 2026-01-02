@@ -215,9 +215,12 @@ async def reload_tools(req: ReloadToolsRequest) -> ReloadToolsResponse:
 async def wake(req: WakeRequest) -> WakeResponse:
     """Handle wake word detection - greet the user.
 
-    This endpoint is called by the frontend when the wake word ("Hey Cal")
-    is detected. The agent responds with a brief greeting to acknowledge
-    the user and indicate readiness.
+    This endpoint is primarily for:
+    - Client-side wake word detection (Picovoice - deprecated)
+    - Manual testing via curl
+
+    Server-side wake word detection (OpenWakeWord) handles greetings
+    directly in voice_agent.py for lower latency.
 
     Args:
         req: WakeRequest with room_name
@@ -241,10 +244,22 @@ async def wake(req: WakeRequest) -> WakeResponse:
     session, _agent = result
     logger.info(f"Wake word detected in room {req.room_name}")
 
-    # Say a random greeting directly (bypasses LLM for instant response)
+    # Get greeting
     greetings = settings_module.get_setting("wake_greetings")
     greeting = random.choice(greetings)
-    await session.say(greeting)
+
+    # Call TTS directly and push to audio output, bypassing agent turn-taking
+    tts = session.tts
+    audio_output = session.output.audio
+    audio_stream = tts.synthesize(greeting)
+
+    # Push audio frames directly to the audio output
+    async for event in audio_stream:
+        if hasattr(event, 'frame') and event.frame:
+            await audio_output.capture_frame(event.frame)
+
+    # Flush to complete the segment
+    audio_output.flush()
 
     return WakeResponse(status="greeted", room_name=req.room_name)
 
