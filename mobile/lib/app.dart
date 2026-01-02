@@ -6,15 +6,56 @@ import 'package:provider/provider.dart';
 import 'controllers/app_ctrl.dart';
 import 'controllers/tool_status_ctrl.dart';
 import 'screens/agent_screen.dart';
+import 'screens/setup_screen.dart';
 import 'screens/welcome_screen.dart';
+import 'services/config_service.dart';
 import 'ui/color_pallette.dart' show LKColorPaletteLight, LKColorPaletteDark;
 import 'widgets/app_layout_switcher.dart';
 import 'widgets/session_error_banner.dart';
 
-final appCtrl = AppCtrl();
+class CaalApp extends StatefulWidget {
+  final ConfigService configService;
 
-class CaalApp extends StatelessWidget {
-  const CaalApp({super.key});
+  const CaalApp({super.key, required this.configService});
+
+  @override
+  State<CaalApp> createState() => _CaalAppState();
+}
+
+class _CaalAppState extends State<CaalApp> {
+  AppCtrl? _appCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeAppCtrl();
+  }
+
+  void _initializeAppCtrl() {
+    if (widget.configService.isConfigured) {
+      _appCtrl = AppCtrl(
+        serverUrl: widget.configService.serverUrl,
+        porcupineAccessKey: widget.configService.porcupineAccessKey,
+        wakeWordPath: widget.configService.wakeWordPath,
+      );
+    }
+  }
+
+  void _onConfigured() {
+    setState(() {
+      _appCtrl = AppCtrl(
+        serverUrl: widget.configService.serverUrl,
+        porcupineAccessKey: widget.configService.porcupineAccessKey,
+        wakeWordPath: widget.configService.wakeWordPath,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _appCtrl?.dispose();
+    super.dispose();
+  }
 
   ThemeData buildTheme({required bool isLight}) {
     final colorPallete = isLight ? LKColorPaletteLight() : LKColorPaletteDark();
@@ -34,7 +75,7 @@ class CaalApp extends StatelessWidget {
         colorScheme: ColorScheme.dark(
           primary: Colors.white,
           secondary: Colors.white,
-          surface: const Color(0xFF45997C),  // Teal/green to match web frontend
+          surface: const Color(0xFF45997C),
         ),
       ),
       colorScheme: isLight
@@ -46,7 +87,7 @@ class CaalApp extends StatelessWidget {
           : const ColorScheme.dark(
               primary: Colors.white,
               secondary: Colors.white,
-              surface: const Color(0xFF1A1A1A),  // Dark gray to match web frontend
+              surface: Color(0xFF1A1A1A),
             ),
       textTheme: const TextTheme(
         bodyMedium: TextStyle(
@@ -58,11 +99,31 @@ class CaalApp extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext ctx) => ChangeNotifierProvider.value(
-        value: appCtrl,
+  Widget build(BuildContext context) {
+    // Show setup screen if not configured
+    if (_appCtrl == null) {
+      return ChangeNotifierProvider.value(
+        value: widget.configService,
+        child: MaterialApp(
+          title: 'CAAL',
+          theme: buildTheme(isLight: true),
+          darkTheme: buildTheme(isLight: false),
+          themeMode: ThemeMode.dark,
+          home: SetupScreen(
+            configService: widget.configService,
+            onConfigured: _onConfigured,
+          ),
+        ),
+      );
+    }
+
+    // Normal app flow with AppCtrl
+    return ChangeNotifierProvider.value(
+      value: widget.configService,
+      child: ChangeNotifierProvider.value(
+        value: _appCtrl!,
         child: Consumer<AppCtrl>(
           builder: (ctx, appCtrl, _) {
-            // Use sessionKey to force rebuild when session objects are recreated
             final toolStatusCtrl = ToolStatusCtrl(room: appCtrl.room);
 
             return MultiProvider(
@@ -104,5 +165,7 @@ class CaalApp extends StatelessWidget {
             );
           },
         ),
-      );
+      ),
+    );
+  }
 }

@@ -6,7 +6,6 @@ import 'package:livekit_client/livekit_client.dart' as sdk;
 import 'package:livekit_components/livekit_components.dart' as components;
 import 'package:logging/logging.dart';
 import 'package:uuid/uuid.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../services/caal_token_source.dart';
 import '../services/wake_word_service.dart';
@@ -18,6 +17,15 @@ enum AgentScreenState { visualizer, transcription }
 class AppCtrl extends ChangeNotifier {
   static const uuid = Uuid();
   static final _logger = Logger('AppCtrl');
+
+  // Configuration (mutable to allow updates from settings)
+  String _serverUrl;
+  String _porcupineAccessKey;
+  String _wakeWordPath;
+
+  String get serverUrl => _serverUrl;
+  String get porcupineAccessKey => _porcupineAccessKey;
+  String get wakeWordPath => _wakeWordPath;
 
   // States
   AppScreenState appScreenState = AppScreenState.welcome;
@@ -40,20 +48,12 @@ class AppCtrl extends ChangeNotifier {
   sdk.Session get session => _session;
 
   // Wake word detection
-  late final WakeWordService wakeWordService;
+  late WakeWordService wakeWordService;
   bool get isWakeWordEnabled => wakeWordService.isEnabled;
-
-  static String get _caalServerUrl {
-    final url = dotenv.env['CAAL_SERVER_URL']?.replaceAll('"', '');
-    if (url == null || url.isEmpty) {
-      throw StateError('CAAL_SERVER_URL is not set in .env');
-    }
-    return url;
-  }
 
   sdk.Session _createSession() {
     return sdk.Session.fromConfigurableTokenSource(
-      createCaalTokenSource(_caalServerUrl).cached(),
+      createCaalTokenSource(serverUrl).cached(),
       options: sdk.SessionOptions(room: _room),
     );
   }
@@ -112,7 +112,13 @@ class AppCtrl extends ChangeNotifier {
   bool isSessionStarting = false;
   bool _hasCleanedUp = false;
 
-  AppCtrl() {
+  AppCtrl({
+    required String serverUrl,
+    String porcupineAccessKey = '',
+    String wakeWordPath = '',
+  })  : _serverUrl = serverUrl,
+        _porcupineAccessKey = porcupineAccessKey,
+        _wakeWordPath = wakeWordPath {
     final format = DateFormat('HH:mm:ss');
     Logger.root.level = Level.FINE;
     Logger.root.onRecord.listen((record) {
@@ -130,7 +136,44 @@ class AppCtrl extends ChangeNotifier {
     session.addListener(_handleSessionChange);
 
     // Initialize wake word service (not started until user enables it)
-    wakeWordService = WakeWordService(onWakeWordDetected: _onWakeWordDetected);
+    wakeWordService = WakeWordService(
+      onWakeWordDetected: _onWakeWordDetected,
+      serverUrl: serverUrl,
+      porcupineAccessKey: porcupineAccessKey,
+      customWakeWordPath: wakeWordPath,
+    );
+  }
+
+  /// Update config and recreate wake word service with new values.
+  /// Called when user changes settings.
+  void updateConfig({
+    required String serverUrl,
+    required String porcupineAccessKey,
+    required String wakeWordPath,
+  }) {
+    // Only recreate if values actually changed
+    if (serverUrl == _serverUrl &&
+        porcupineAccessKey == _porcupineAccessKey &&
+        wakeWordPath == _wakeWordPath) {
+      return;
+    }
+
+    _logger.info('Updating config - serverUrl: $serverUrl, porcupineKey: ${porcupineAccessKey.isNotEmpty ? "(set)" : "(empty)"}, wakeWordPath: ${wakeWordPath.isNotEmpty ? wakeWordPath : "(default)"}');
+
+    _serverUrl = serverUrl;
+    _porcupineAccessKey = porcupineAccessKey;
+    _wakeWordPath = wakeWordPath;
+
+    // Recreate wake word service with new key/path
+    wakeWordService.dispose();
+    wakeWordService = WakeWordService(
+      onWakeWordDetected: _onWakeWordDetected,
+      serverUrl: serverUrl,
+      porcupineAccessKey: porcupineAccessKey,
+      customWakeWordPath: wakeWordPath,
+    );
+
+    notifyListeners();
   }
 
   /// Called when wake word is detected - unmutes the microphone.

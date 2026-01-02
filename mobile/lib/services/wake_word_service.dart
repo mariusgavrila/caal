@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:porcupine_flutter/porcupine_manager.dart';
 import 'package:porcupine_flutter/porcupine_error.dart';
@@ -9,6 +8,9 @@ import 'package:porcupine_flutter/porcupine_error.dart';
 class WakeWordService extends ChangeNotifier {
   PorcupineManager? _porcupineManager;
   final VoidCallback onWakeWordDetected;
+  final String serverUrl;
+  final String porcupineAccessKey;
+  final String? customWakeWordPath;
   bool _isEnabled = false;
   bool _isReady = false;
 
@@ -18,16 +20,20 @@ class WakeWordService extends ChangeNotifier {
   bool get isEnabled => _isEnabled;
   bool get isReady => _isReady;
 
-  WakeWordService({required this.onWakeWordDetected});
+  WakeWordService({
+    required this.onWakeWordDetected,
+    required this.serverUrl,
+    required this.porcupineAccessKey,
+    this.customWakeWordPath,
+  });
 
   /// Calls the backend /api/wake endpoint to trigger a greeting.
   Future<void> _callWakeApi() async {
-    final baseUrl = dotenv.env['CAAL_SERVER_URL']?.replaceAll('"', '');
-    if (baseUrl == null || baseUrl.isEmpty) return;
+    if (serverUrl.isEmpty) return;
 
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/api/wake'),
+        Uri.parse('$serverUrl/api/wake'),
         headers: {'Content-Type': 'application/json'},
         body: '{"room_name": "voice_assistant_room"}',
       );
@@ -45,16 +51,20 @@ class WakeWordService extends ChangeNotifier {
   Future<bool> enable() async {
     if (_isEnabled) return true;
 
-    final accessKey = dotenv.env['PORCUPINE_ACCESS_KEY']?.replaceAll('"', '');
-    if (accessKey == null || accessKey.isEmpty) {
-      debugPrint('[WakeWordService] PORCUPINE_ACCESS_KEY not set, wake word disabled');
+    if (porcupineAccessKey.isEmpty) {
+      debugPrint('[WakeWordService] Porcupine access key not set, wake word disabled');
       return false;
     }
 
     try {
+      // Use custom path if set, otherwise fall back to bundled asset
+      final wakeWordPath = (customWakeWordPath?.isNotEmpty == true)
+          ? customWakeWordPath!
+          : 'assets/wakeword.ppn';
+
       _porcupineManager = await PorcupineManager.fromKeywordPaths(
-        accessKey,
-        ['assets/wakeword.ppn'],
+        porcupineAccessKey,
+        [wakeWordPath],
         _onWakeWordCallback,
         errorCallback: _onError,
       );
@@ -94,6 +104,7 @@ class WakeWordService extends ChangeNotifier {
   }
 
   /// Clean up resources.
+  @override
   Future<void> dispose() async {
     await disable();
     super.dispose();
