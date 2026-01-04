@@ -52,13 +52,10 @@ mcp_servers.json
 # Database files
 *.db
 
-# Models (large files - download separately)
-*.onnx
-*.onnx.json
+# Models - wake word models are tracked in /models/
 *.bin
 *.pt
 *.pth
-/models/
 
 # Logs
 *.log
