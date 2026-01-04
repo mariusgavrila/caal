@@ -8,11 +8,7 @@
 
 Built on [LiveKit Agents](https://docs.livekit.io/agents/) with fully local STT/TTS/LLM using [Speaches](https://github.com/speaches-ai/speaches), [Kokoro](https://github.com/remsky/Kokoro-FastAPI), and [Ollama](https://ollama.ai/).
 
-<picture>
-  <source srcset="frontend/.github/assets/readme-hero-dark.webp" media="(prefers-color-scheme: dark)">
-  <source srcset="frontend/.github/assets/readme-hero-light.webp" media="(prefers-color-scheme: light)">
-  <img src="frontend/.github/assets/readme-hero-light.webp" alt="CAAL Voice Assistant">
-</picture>
+![CAAL Voice Assistant](frontend/.github/assets/readme-hero.webp)
 
 ## Features
 
