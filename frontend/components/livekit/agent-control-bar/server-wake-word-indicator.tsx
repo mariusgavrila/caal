@@ -7,6 +7,19 @@ import { useWakeWordState } from '@/hooks/useWakeWordState';
 import { cn } from '@/lib/utils';
 
 /**
+ * Format wake word model path to display name.
+ * e.g., "models/hey_cal.onnx" -> "Hey Cal"
+ */
+function formatWakeWordName(modelPath: string): string {
+  const filename = modelPath.split('/').pop() || modelPath;
+  const name = filename.replace('.onnx', '').replace(/_/g, ' ');
+  return name
+    .split(' ')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/**
  * Indicator for server-side wake word detection state.
  * Shows an ear icon with color indicating current state:
  * - Blue: Sleeping (waiting for wake word)
@@ -17,6 +30,18 @@ import { cn } from '@/lib/utils';
  */
 export function ServerWakeWordIndicator({ className }: { className?: string }) {
   const state = useWakeWordState();
+  const [wakeWordName, setWakeWordName] = React.useState<string>('');
+
+  // Fetch wake word model name from settings
+  React.useEffect(() => {
+    fetch('/api/settings')
+      .then((res) => res.json())
+      .then((data) => {
+        const modelPath = data.settings?.wake_word_model || 'models/hey_cal.onnx';
+        setWakeWordName(formatWakeWordName(modelPath));
+      })
+      .catch(() => setWakeWordName('Hey Cal'));
+  }, []);
 
   // Determine icon and color based on state
   const isDisabled = state === null;
@@ -28,7 +53,7 @@ export function ServerWakeWordIndicator({ className }: { className?: string }) {
   const title = isDisabled
     ? 'Wake word detection disabled'
     : isSleeping
-      ? 'Waiting for wake word - say "Hey Jarvis"'
+      ? `Waiting for wake word - say "${wakeWordName}"`
       : 'Listening - speak now';
 
   return (

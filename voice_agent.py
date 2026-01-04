@@ -17,7 +17,7 @@ Environment Variables:
     KOKORO_URL          - Kokoro TTS service URL (default: "http://kokoro:8880")
     WHISPER_MODEL       - Whisper model for STT (default: "Systran/faster-whisper-small")
     TTS_VOICE           - Kokoro voice name (default: "af_heart")
-    OLLAMA_MODEL        - Ollama model name (default: "qwen3:8b")
+    OLLAMA_MODEL        - Ollama model name (default: "ministral-3:8b")
     OLLAMA_THINK        - Enable thinking mode (default: "false")
     TIMEZONE            - Timezone for date/time (default: "Pacific Time")
 """
@@ -452,7 +452,7 @@ def preload_models():
     speaches_url = os.getenv("SPEACHES_URL", "http://speaches:8000")
     whisper_model = os.getenv("WHISPER_MODEL", "Systran/faster-whisper-medium")
     ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+    ollama_model = os.getenv("OLLAMA_MODEL", "ministral-3:8b")
     ollama_num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 
     logger.info("Preloading models...")
