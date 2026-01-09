@@ -34,27 +34,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // Agent settings fields
   String _agentName = 'Cal';
+  List<String> _wakeGreetings = ["Hey, what's up?", "What's up?", 'How can I help?'];
+
+  // Provider settings
+  String _llmProvider = 'ollama';
+  String _ollamaHost = 'http://localhost:11434';
+  String _ollamaModel = '';
+  String _groqApiKey = '';
+  String _groqModel = '';
   String _ttsProvider = 'kokoro';
   String _ttsVoiceKokoro = 'am_puck';
   String _ttsVoicePiper = 'speaches-ai/piper-en_US-ljspeech-medium';
-  String _model = 'ministral-3:8b';
-  List<String> _wakeGreetings = ["Hey, what's up?", "What's up?", 'How can I help?'];
+
+  // Integration settings
+  bool _hassEnabled = false;
+  String _hassHost = '';
+  String _hassToken = '';
+  bool _n8nEnabled = false;
+  String _n8nUrl = '';
+  String _n8nToken = '';
+
+  // LLM settings
   double _temperature = 0.7;
   int _numCtx = 8192;
   int _maxTurns = 20;
   int _toolCacheSize = 3;
-  bool _wakeWordEnabled = false;
-  String _wakeWordModel = 'models/hey_cal.onnx';
-  double _wakeWordThreshold = 0.5;
-  double _wakeWordTimeout = 3.0;
+
   // Turn detection
   bool _allowInterruptions = true;
   double _minEndpointingDelay = 0.5;
 
+  // Wake word
+  bool _wakeWordEnabled = false;
+  String _wakeWordModel = 'models/hey_cal.onnx';
+  double _wakeWordThreshold = 0.5;
+  double _wakeWordTimeout = 3.0;
+
   // Available options
   List<String> _voices = [];
-  List<String> _models = [];
+  List<String> _ollamaModels = [];
+  List<String> _groqModels = [];
   List<String> _wakeWordModels = [];
+
+  // Test states
+  bool _testingOllama = false;
+  bool _ollamaConnected = false;
+  String? _ollamaError;
+  bool _testingGroq = false;
+  bool _groqConnected = false;
+  String? _groqError;
+  bool _testingHass = false;
+  bool _hassConnected = false;
+  String? _hassError;
+  String? _hassInfo;
+  bool _testingN8n = false;
+  bool _n8nConnected = false;
+  String? _n8nError;
 
   // Text controllers
   final _wakeGreetingsController = TextEditingController();
@@ -136,17 +171,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
+      // First load settings to get the correct tts_provider
+      final settingsRes = await http.get(Uri.parse('$webhookUrl/settings'));
+
+      String ttsProvider = _ttsProvider;
+      if (settingsRes.statusCode == 200) {
+        final data = jsonDecode(settingsRes.body);
+        final settings = data['settings'] ?? {};
+        ttsProvider = settings['tts_provider'] ?? _ttsProvider;
+      }
+
+      // Now fetch voices with the correct provider, plus wake word models
       final results = await Future.wait([
-        http.get(Uri.parse('$webhookUrl/settings')),
-        http.get(Uri.parse('$webhookUrl/voices?provider=$_ttsProvider')),
-        http.get(Uri.parse('$webhookUrl/models')),
+        http.get(Uri.parse('$webhookUrl/voices?provider=$ttsProvider')),
         http.get(Uri.parse('$webhookUrl/wake-word/models')),
       ]);
 
-      final settingsRes = results[0];
-      final voicesRes = results[1];
-      final modelsRes = results[2];
-      final wakeWordModelsRes = results[3];
+      final voicesRes = results[0];
+      final wakeWordModelsRes = results[1];
 
       if (settingsRes.statusCode == 200) {
         final data = jsonDecode(settingsRes.body);
@@ -154,23 +196,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         setState(() {
           _serverConnected = true;
+          // Agent
           _agentName = settings['agent_name'] ?? _agentName;
+          _wakeGreetings = List<String>.from(settings['wake_greetings'] ?? _wakeGreetings);
+          _wakeGreetingsController.text = _wakeGreetings.join('\n');
+
+          // Providers
+          _llmProvider = settings['llm_provider'] ?? _llmProvider;
+          _ollamaHost = settings['ollama_host'] ?? _ollamaHost;
+          _ollamaModel = settings['ollama_model'] ?? _ollamaModel;
+          _groqModel = settings['groq_model'] ?? _groqModel;
           _ttsProvider = settings['tts_provider'] ?? _ttsProvider;
           _ttsVoiceKokoro = settings['tts_voice_kokoro'] ?? _ttsVoiceKokoro;
           _ttsVoicePiper = settings['tts_voice_piper'] ?? _ttsVoicePiper;
-          _model = settings['model'] ?? _model;
-          _wakeGreetings = List<String>.from(settings['wake_greetings'] ?? _wakeGreetings);
+
+          // Integrations
+          _hassEnabled = settings['hass_enabled'] ?? _hassEnabled;
+          _hassHost = settings['hass_host'] ?? _hassHost;
+          _hassToken = settings['hass_token'] ?? _hassToken;
+          _n8nEnabled = settings['n8n_enabled'] ?? _n8nEnabled;
+          _n8nUrl = settings['n8n_url'] ?? _n8nUrl;
+          _n8nToken = settings['n8n_token'] ?? _n8nToken;
+
+          // LLM settings
           _temperature = (settings['temperature'] ?? _temperature).toDouble();
           _numCtx = settings['num_ctx'] ?? _numCtx;
           _maxTurns = settings['max_turns'] ?? _maxTurns;
           _toolCacheSize = settings['tool_cache_size'] ?? _toolCacheSize;
+
+          // Turn detection
+          _allowInterruptions = settings['allow_interruptions'] ?? _allowInterruptions;
+          _minEndpointingDelay = (settings['min_endpointing_delay'] ?? _minEndpointingDelay).toDouble();
+
+          // Wake word
           _wakeWordEnabled = settings['wake_word_enabled'] ?? _wakeWordEnabled;
           _wakeWordModel = settings['wake_word_model'] ?? _wakeWordModel;
           _wakeWordThreshold = (settings['wake_word_threshold'] ?? _wakeWordThreshold).toDouble();
           _wakeWordTimeout = (settings['wake_word_timeout'] ?? _wakeWordTimeout).toDouble();
-          _allowInterruptions = settings['allow_interruptions'] ?? _allowInterruptions;
-          _minEndpointingDelay = (settings['min_endpointing_delay'] ?? _minEndpointingDelay).toDouble();
-          _wakeGreetingsController.text = _wakeGreetings.join('\n');
         });
       }
 
@@ -178,13 +240,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final data = jsonDecode(voicesRes.body);
         setState(() {
           _voices = List<String>.from(data['voices'] ?? []);
-        });
-      }
-
-      if (modelsRes.statusCode == 200) {
-        final data = jsonDecode(modelsRes.body);
-        setState(() {
-          _models = List<String>.from(data['models'] ?? []);
         });
       }
 
@@ -230,6 +285,173 @@ class _SettingsScreenState extends State<SettingsScreen> {
     unawaited(_fetchVoices(provider));
   }
 
+  Future<void> _testOllama() async {
+    if (_ollamaHost.isEmpty) return;
+    setState(() {
+      _testingOllama = true;
+      _ollamaError = null;
+    });
+
+    try {
+      final res = await http.post(
+        Uri.parse('$_webhookUrl/setup/test-ollama'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'host': _ollamaHost}),
+      );
+      final result = jsonDecode(res.body);
+
+      if (result['success'] == true) {
+        setState(() {
+          _ollamaConnected = true;
+          _ollamaModels = List<String>.from(result['models'] ?? []);
+          if (_ollamaModel.isEmpty && _ollamaModels.isNotEmpty) {
+            _ollamaModel = _ollamaModels.first;
+          }
+        });
+      } else {
+        setState(() {
+          _ollamaConnected = false;
+          _ollamaError = result['error'] ?? 'Connection failed';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _ollamaConnected = false;
+        _ollamaError = 'Failed to connect';
+      });
+    } finally {
+      setState(() {
+        _testingOllama = false;
+      });
+    }
+  }
+
+  Future<void> _testGroq() async {
+    if (_groqApiKey.isEmpty) return;
+    setState(() {
+      _testingGroq = true;
+      _groqError = null;
+    });
+
+    try {
+      final res = await http.post(
+        Uri.parse('$_webhookUrl/setup/test-groq'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'api_key': _groqApiKey}),
+      );
+      final result = jsonDecode(res.body);
+
+      if (result['success'] == true) {
+        setState(() {
+          _groqConnected = true;
+          _groqModels = List<String>.from(result['models'] ?? []);
+          if (_groqModel.isEmpty && _groqModels.isNotEmpty) {
+            final preferred = 'llama-3.3-70b-versatile';
+            _groqModel = _groqModels.contains(preferred) ? preferred : _groqModels.first;
+          }
+        });
+      } else {
+        setState(() {
+          _groqConnected = false;
+          _groqError = result['error'] ?? 'Invalid API key';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _groqConnected = false;
+        _groqError = 'Failed to validate';
+      });
+    } finally {
+      setState(() {
+        _testingGroq = false;
+      });
+    }
+  }
+
+  Future<void> _testHass() async {
+    if (_hassHost.isEmpty || _hassToken.isEmpty) return;
+    setState(() {
+      _testingHass = true;
+      _hassError = null;
+      _hassInfo = null;
+    });
+
+    try {
+      final res = await http.post(
+        Uri.parse('$_webhookUrl/setup/test-hass'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'host': _hassHost, 'token': _hassToken}),
+      );
+      final result = jsonDecode(res.body);
+
+      if (result['success'] == true) {
+        setState(() {
+          _hassConnected = true;
+          _hassInfo = 'Connected - ${result['device_count']} entities';
+        });
+      } else {
+        setState(() {
+          _hassConnected = false;
+          _hassError = result['error'] ?? 'Connection failed';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _hassConnected = false;
+        _hassError = 'Failed to connect';
+      });
+    } finally {
+      setState(() {
+        _testingHass = false;
+      });
+    }
+  }
+
+  String _getN8nMcpUrl(String host) {
+    if (host.isEmpty) return '';
+    final baseUrl = host.replaceAll(RegExp(r'/$'), '');
+    if (baseUrl.contains('/mcp-server')) return baseUrl;
+    return '$baseUrl/mcp-server/http';
+  }
+
+  Future<void> _testN8n() async {
+    if (_n8nUrl.isEmpty || _n8nToken.isEmpty) return;
+    setState(() {
+      _testingN8n = true;
+      _n8nError = null;
+    });
+
+    try {
+      final mcpUrl = _getN8nMcpUrl(_n8nUrl);
+      final res = await http.post(
+        Uri.parse('$_webhookUrl/setup/test-n8n'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'url': mcpUrl, 'token': _n8nToken}),
+      );
+      final result = jsonDecode(res.body);
+
+      if (result['success'] == true) {
+        setState(() {
+          _n8nConnected = true;
+        });
+      } else {
+        setState(() {
+          _n8nConnected = false;
+          _n8nError = result['error'] ?? 'Connection failed';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _n8nConnected = false;
+        _n8nError = 'Failed to connect';
+      });
+    } finally {
+      setState(() {
+        _testingN8n = false;
+      });
+    }
+  }
+
   String get _currentVoice {
     return _ttsProvider == 'piper' ? _ttsVoicePiper : _ttsVoiceKokoro;
   }
@@ -263,22 +485,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _wakeGreetingsController.text.split('\n').where((g) => g.trim().isNotEmpty).toList();
 
         final settings = {
+          // Agent
           'agent_name': _agentName,
+          'wake_greetings': greetings,
+
+          // Providers
+          'llm_provider': _llmProvider,
+          'ollama_host': _ollamaHost,
+          'ollama_model': _ollamaModel,
+          'groq_model': _groqModel,
           'tts_provider': _ttsProvider,
           'tts_voice_kokoro': _ttsVoiceKokoro,
           'tts_voice_piper': _ttsVoicePiper,
-          'model': _model,
-          'wake_greetings': greetings,
+
+          // Integrations
+          'hass_enabled': _hassEnabled,
+          'hass_host': _hassHost,
+          'hass_token': _hassToken,
+          'n8n_enabled': _n8nEnabled,
+          'n8n_url': _n8nEnabled ? _getN8nMcpUrl(_n8nUrl) : _n8nUrl,
+          'n8n_token': _n8nToken,
+
+          // LLM settings
           'temperature': _temperature,
           'num_ctx': _numCtx,
           'max_turns': _maxTurns,
           'tool_cache_size': _toolCacheSize,
+
+          // Turn detection
+          'allow_interruptions': _allowInterruptions,
+          'min_endpointing_delay': _minEndpointingDelay,
+
+          // Wake word
           'wake_word_enabled': _wakeWordEnabled,
           'wake_word_model': _wakeWordModel,
           'wake_word_threshold': _wakeWordThreshold,
           'wake_word_timeout': _wakeWordTimeout,
-          'allow_interruptions': _allowInterruptions,
-          'min_endpointing_delay': _minEndpointingDelay,
         };
 
         final res = await http.post(
@@ -292,6 +534,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _error = 'Failed to save agent settings: ${res.statusCode}';
           });
           return;
+        }
+
+        // Save Groq API key if using Groq and key was entered
+        if (_llmProvider == 'groq' && _groqApiKey.isNotEmpty) {
+          await http.post(
+            Uri.parse('$_webhookUrl/setup/complete'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'llm_provider': 'groq',
+              'groq_api_key': _groqApiKey,
+              'groq_model': _groqModel,
+            }),
+          );
         }
 
         // Download Piper model if using Piper
@@ -461,8 +716,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ]),
 
-              // Agent Settings (only show if connected)
+              // Settings (only show if connected)
               if (_serverConnected) ...[
+                // Agent Section
                 const SizedBox(height: 24),
                 _buildSectionHeader('Agent', Icons.smart_toy_outlined),
                 _buildCard([
@@ -471,92 +727,131 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: _agentName,
                     onChanged: (v) => setState(() => _agentName = v),
                   ),
-                  _buildLabel('TTS Engine'),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _handleTtsProviderChange('kokoro'),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            decoration: BoxDecoration(
-                              color: _ttsProvider == 'kokoro'
-                                  ? const Color(0xFF45997C).withValues(alpha: 0.2)
-                                  : const Color(0xFF2A2A2A),
-                              border: Border.all(
-                                color: _ttsProvider == 'kokoro'
-                                    ? const Color(0xFF45997C)
-                                    : Colors.white.withValues(alpha: 0.1),
-                              ),
-                              borderRadius: const BorderRadius.only(
-                                topLeft: Radius.circular(8),
-                                bottomLeft: Radius.circular(8),
-                              ),
-                            ),
-                            child: Column(
-                              children: [
-                                Text(
-                                  'Kokoro',
-                                  style: TextStyle(
-                                    color: _ttsProvider == 'kokoro' ? Colors.white : Colors.white70,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'GPU neural TTS',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.5),
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ],
-                            ),
+                  _buildLabel('Wake Greetings'),
+                  TextFormField(
+                    controller: _wakeGreetingsController,
+                    maxLines: 3,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: _inputDecoration(hint: 'One greeting per line'),
+                  ),
+                ]),
+
+                // Providers Section
+                const SizedBox(height: 24),
+                _buildSectionHeader('Providers', Icons.cloud_outlined),
+                _buildCard([
+                  // LLM Provider
+                  _buildLabel('LLM Provider'),
+                  _buildProviderToggle(
+                    options: ['ollama', 'groq'],
+                    labels: ['Ollama', 'Groq'],
+                    subtitles: ['Local, private', 'Fast cloud'],
+                    selected: _llmProvider,
+                    onChanged: (v) => setState(() => _llmProvider = v),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Ollama config
+                  if (_llmProvider == 'ollama') ...[
+                    _buildLabel('Ollama Host'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            initialValue: _ollamaHost,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _inputDecoration(hint: 'http://localhost:11434'),
+                            onChanged: (v) => setState(() => _ollamaHost = v),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        _buildTestButton(
+                          testing: _testingOllama,
+                          connected: _ollamaConnected,
+                          onPressed: _testOllama,
+                        ),
+                      ],
+                    ),
+                    if (_ollamaError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(_ollamaError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
                       ),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => _handleTtsProviderChange('piper'),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            decoration: BoxDecoration(
-                              color: _ttsProvider == 'piper'
-                                  ? const Color(0xFF45997C).withValues(alpha: 0.2)
-                                  : const Color(0xFF2A2A2A),
-                              border: Border.all(
-                                color: _ttsProvider == 'piper'
-                                    ? const Color(0xFF45997C)
-                                    : Colors.white.withValues(alpha: 0.1),
-                              ),
-                              borderRadius: const BorderRadius.only(
-                                topRight: Radius.circular(8),
-                                bottomRight: Radius.circular(8),
-                              ),
-                            ),
-                            child: Column(
-                              children: [
-                                Text(
-                                  'Piper',
-                                  style: TextStyle(
-                                    color: _ttsProvider == 'piper' ? Colors.white : Colors.white70,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'CPU lightweight',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.5),
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ],
-                            ),
+                    if (_ollamaConnected)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('${_ollamaModels.length} models available',
+                            style: const TextStyle(color: Color(0xFF45997C), fontSize: 12)),
+                      ),
+                    const SizedBox(height: 12),
+                    if (_ollamaModels.isNotEmpty || _ollamaModel.isNotEmpty)
+                      _buildDropdown(
+                        label: 'Model',
+                        value: _ollamaModel.isNotEmpty ? _ollamaModel : (_ollamaModels.isNotEmpty ? _ollamaModels.first : ''),
+                        options: _ollamaModels.isNotEmpty ? _ollamaModels : [_ollamaModel],
+                        onChanged: (v) => setState(() => _ollamaModel = v ?? _ollamaModel),
+                      ),
+                  ],
+
+                  // Groq config
+                  if (_llmProvider == 'groq') ...[
+                    _buildLabel('API Key'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            initialValue: _groqApiKey,
+                            obscureText: true,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _inputDecoration(hint: _groqModel.isNotEmpty ? '••••••••••••••••' : 'gsk_...'),
+                            onChanged: (v) => setState(() => _groqApiKey = v),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        _buildTestButton(
+                          testing: _testingGroq,
+                          connected: _groqConnected,
+                          onPressed: _testGroq,
+                        ),
+                      ],
+                    ),
+                    if (_groqError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(_groqError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
                       ),
-                    ],
+                    if (_groqConnected)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('${_groqModels.length} models available',
+                            style: const TextStyle(color: Color(0xFF45997C), fontSize: 12)),
+                      ),
+                    if (!_groqConnected && _groqApiKey.isEmpty && _groqModel.isNotEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text('API key configured (enter new key to change)',
+                            style: TextStyle(color: Color(0xFF45997C), fontSize: 12)),
+                      ),
+                    const SizedBox(height: 12),
+                    if (_groqModels.isNotEmpty || _groqModel.isNotEmpty)
+                      _buildDropdown(
+                        label: 'Model',
+                        value: _groqModel.isNotEmpty ? _groqModel : (_groqModels.isNotEmpty ? _groqModels.first : ''),
+                        options: _groqModels.isNotEmpty ? _groqModels : [_groqModel],
+                        onChanged: (v) => setState(() => _groqModel = v ?? _groqModel),
+                      ),
+                  ],
+
+                  const Divider(color: Colors.white24, height: 32),
+
+                  // TTS Provider
+                  _buildLabel('TTS Provider'),
+                  _buildProviderToggle(
+                    options: ['kokoro', 'piper'],
+                    labels: ['Kokoro', 'Piper'],
+                    subtitles: ['GPU neural TTS', 'CPU lightweight'],
+                    selected: _ttsProvider,
+                    onChanged: _handleTtsProviderChange,
                   ),
                   const SizedBox(height: 16),
                   _buildDropdown(
@@ -565,19 +860,130 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     options: _voices.isNotEmpty ? _voices : [_currentVoice],
                     onChanged: (v) => _setCurrentVoice(v ?? _currentVoice),
                   ),
-                  _buildDropdown(
-                    label: 'Model',
-                    value: _model,
-                    options: _models.isNotEmpty ? _models : [_model],
-                    onChanged: (v) => setState(() => _model = v ?? _model),
+                ]),
+
+                // Integrations Section
+                const SizedBox(height: 24),
+                _buildSectionHeader('Integrations', Icons.extension_outlined),
+
+                // Home Assistant
+                _buildCard([
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Home Assistant',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      Switch(
+                        value: _hassEnabled,
+                        onChanged: (v) => setState(() => _hassEnabled = v),
+                        activeTrackColor: const Color(0xFF45997C),
+                      ),
+                    ],
                   ),
-                  _buildLabel('Wake Greetings'),
-                  TextFormField(
-                    controller: _wakeGreetingsController,
-                    maxLines: 3,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _inputDecoration(hint: 'One greeting per line'),
+                  if (_hassEnabled) ...[
+                    const SizedBox(height: 12),
+                    _buildLabel('Host URL'),
+                    TextFormField(
+                      initialValue: _hassHost,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _inputDecoration(hint: 'http://homeassistant.local:8123'),
+                      onChanged: (v) => setState(() => _hassHost = v),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildLabel('Access Token'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            initialValue: _hassToken,
+                            obscureText: true,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _inputDecoration(hint: 'eyJ0eX...'),
+                            onChanged: (v) => setState(() => _hassToken = v),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _buildTestButton(
+                          testing: _testingHass,
+                          connected: _hassConnected,
+                          onPressed: _testHass,
+                        ),
+                      ],
+                    ),
+                    if (_hassError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(_hassError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                      ),
+                    if (_hassInfo != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(_hassInfo!, style: const TextStyle(color: Color(0xFF45997C), fontSize: 12)),
+                      ),
+                  ],
+                ]),
+
+                const SizedBox(height: 12),
+
+                // n8n
+                _buildCard([
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('n8n', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      Switch(
+                        value: _n8nEnabled,
+                        onChanged: (v) => setState(() => _n8nEnabled = v),
+                        activeTrackColor: const Color(0xFF45997C),
+                      ),
+                    ],
                   ),
+                  if (_n8nEnabled) ...[
+                    const SizedBox(height: 12),
+                    _buildLabel('Host URL'),
+                    TextFormField(
+                      initialValue: _n8nUrl,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _inputDecoration(hint: 'http://n8n:5678'),
+                      onChanged: (v) => setState(() => _n8nUrl = v),
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text('/mcp-server/http will be appended automatically',
+                          style: TextStyle(color: Colors.white38, fontSize: 11)),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildLabel('Access Token'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            initialValue: _n8nToken,
+                            obscureText: true,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: _inputDecoration(hint: 'n8n_api_...'),
+                            onChanged: (v) => setState(() => _n8nToken = v),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _buildTestButton(
+                          testing: _testingN8n,
+                          connected: _n8nConnected,
+                          onPressed: _testN8n,
+                        ),
+                      ],
+                    ),
+                    if (_n8nError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(_n8nError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                      ),
+                    if (_n8nConnected)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text('Connected', style: TextStyle(color: Color(0xFF45997C), fontSize: 12)),
+                      ),
+                  ],
                 ]),
 
                 const SizedBox(height: 24),
@@ -770,6 +1176,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildProviderToggle({
+    required List<String> options,
+    required List<String> labels,
+    required List<String> subtitles,
+    required String selected,
+    required ValueChanged<String> onChanged,
+  }) {
+    return Row(
+      children: [
+        for (int i = 0; i < options.length; i++)
+          Expanded(
+            child: GestureDetector(
+              onTap: () => onChanged(options[i]),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: selected == options[i]
+                      ? const Color(0xFF45997C).withValues(alpha: 0.2)
+                      : const Color(0xFF2A2A2A),
+                  border: Border.all(
+                    color: selected == options[i]
+                        ? const Color(0xFF45997C)
+                        : Colors.white.withValues(alpha: 0.1),
+                  ),
+                  borderRadius: BorderRadius.only(
+                    topLeft: i == 0 ? const Radius.circular(8) : Radius.zero,
+                    bottomLeft: i == 0 ? const Radius.circular(8) : Radius.zero,
+                    topRight: i == options.length - 1 ? const Radius.circular(8) : Radius.zero,
+                    bottomRight: i == options.length - 1 ? const Radius.circular(8) : Radius.zero,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      labels[i],
+                      style: TextStyle(
+                        color: selected == options[i] ? Colors.white : Colors.white70,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitles[i],
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTestButton({
+    required bool testing,
+    required bool connected,
+    required VoidCallback onPressed,
+  }) {
+    return TextButton(
+      onPressed: testing ? null : onPressed,
+      style: TextButton.styleFrom(
+        backgroundColor: connected ? const Color(0xFF45997C) : const Color(0xFF2A2A2A),
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      ),
+      child: testing
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation(Colors.white),
+              ),
+            )
+          : Text(connected ? '✓' : 'Test'),
     );
   }
 

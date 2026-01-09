@@ -81,6 +81,7 @@ logging.getLogger("groq._base_client").setLevel(logging.WARNING)
 logging.getLogger("mcp").setLevel(logging.WARNING)
 logging.getLogger("livekit").setLevel(logging.WARNING)
 logging.getLogger("livekit_api").setLevel(logging.WARNING)
+logging.getLogger("livekit.agents.tts").setLevel(logging.ERROR)  # Suppress "no request_id" warnings
 logging.getLogger("livekit.agents.voice").setLevel(logging.WARNING)
 logging.getLogger("livekit.plugins.openai.tts").setLevel(logging.WARNING)
 

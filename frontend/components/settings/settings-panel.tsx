@@ -2,14 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  Check,
-  CircleNotch,
-  FloppyDisk,
-  GitBranch,
-  House,
-  X,
-} from '@phosphor-icons/react/dist/ssr';
+import { Check, CircleNotch, FloppyDisk, X } from '@phosphor-icons/react/dist/ssr';
 import { Button } from '@/components/livekit/button';
 
 // =============================================================================
@@ -166,20 +159,26 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     setError(null);
 
     try {
-      const [settingsRes, voicesRes, wakeWordModelsRes] = await Promise.all([
-        fetch('/api/settings'),
-        fetch('/api/voices'),
-        fetch('/api/wake-word/models'),
-      ]);
+      // First load settings to get the correct tts_provider
+      const settingsRes = await fetch('/api/settings');
+      let ttsProvider = 'kokoro';
 
       if (settingsRes.ok) {
         const data = await settingsRes.json();
-        setSettings(data.settings || DEFAULT_SETTINGS);
+        const loadedSettings = data.settings || DEFAULT_SETTINGS;
+        setSettings(loadedSettings);
         setPromptContent(data.prompt_content || DEFAULT_PROMPT);
+        ttsProvider = loadedSettings.tts_provider || 'kokoro';
       } else {
         setSettings(DEFAULT_SETTINGS);
         setPromptContent(DEFAULT_PROMPT);
       }
+
+      // Now fetch voices with correct provider, plus wake word models
+      const [voicesRes, wakeWordModelsRes] = await Promise.all([
+        fetch(`/api/voices?provider=${ttsProvider}`),
+        fetch('/api/wake-word/models'),
+      ]);
 
       if (voicesRes.ok) {
         const data = await voicesRes.json();
@@ -632,7 +631,8 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               )}
             </div>
 
-            {ollamaModels.length > 0 && (
+            {/* Show model dropdown if we have models from test OR if model is already configured */}
+            {(ollamaModels.length > 0 || settings.ollama_model) && (
               <div className="space-y-2">
                 <label className="text-sm font-medium">Model</label>
                 <select
@@ -640,13 +640,24 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                   onChange={(e) => setSettings({ ...settings, ollama_model: e.target.value })}
                   className="border-input bg-background w-full rounded-lg border px-4 py-3 text-sm"
                 >
-                  <option value="">Select a model...</option>
-                  {ollamaModels.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
+                  {ollamaModels.length > 0 ? (
+                    <>
+                      <option value="">Select a model...</option>
+                      {ollamaModels.map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                    </>
+                  ) : (
+                    <option value={settings.ollama_model}>{settings.ollama_model}</option>
+                  )}
                 </select>
+                {ollamaModels.length === 0 && settings.ollama_model && (
+                  <p className="text-muted-foreground text-xs">
+                    Test connection to see all available models
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -659,7 +670,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                   type="password"
                   value={groqApiKey}
                   onChange={(e) => setGroqApiKey(e.target.value)}
-                  placeholder="gsk_..."
+                  placeholder={settings.groq_model ? '••••••••••••••••' : 'gsk_...'}
                   className="border-input bg-background flex-1 rounded-lg border px-4 py-3 text-sm"
                 />
                 <button
@@ -675,6 +686,9 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               {groqTest.status === 'success' && (
                 <p className="text-xs text-green-500">{groqModels.length} models available</p>
               )}
+              {!groqApiKey && settings.groq_model && groqTest.status === 'idle' && (
+                <p className="text-xs text-green-500">API key configured (enter new key to change)</p>
+              )}
               <p className="text-muted-foreground text-xs">
                 Get your API key at{' '}
                 <a
@@ -688,7 +702,8 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               </p>
             </div>
 
-            {groqModels.length > 0 && (
+            {/* Show model dropdown if we have models from test OR if model is already configured */}
+            {(groqModels.length > 0 || settings.groq_model) && (
               <div className="space-y-2">
                 <label className="text-sm font-medium">Model</label>
                 <select
@@ -696,13 +711,24 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                   onChange={(e) => setSettings({ ...settings, groq_model: e.target.value })}
                   className="border-input bg-background w-full rounded-lg border px-4 py-3 text-sm"
                 >
-                  <option value="">Select a model...</option>
-                  {groqModels.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
+                  {groqModels.length > 0 ? (
+                    <>
+                      <option value="">Select a model...</option>
+                      {groqModels.map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                    </>
+                  ) : (
+                    <option value={settings.groq_model}>{settings.groq_model}</option>
+                  )}
                 </select>
+                {groqModels.length === 0 && settings.groq_model && (
+                  <p className="text-muted-foreground text-xs">
+                    Enter API key and test to see all available models
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -871,10 +897,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       {/* Home Assistant */}
       <div className="overflow-hidden rounded-xl border">
         <div className="bg-muted/50 flex items-center justify-between border-b px-4 py-3">
-          <div className="flex items-center gap-2">
-            <House className="h-5 w-5 text-blue-500" weight="fill" />
-            <span className="font-semibold">Home Assistant</span>
-          </div>
+          <span className="font-semibold">Home Assistant</span>
           <Toggle
             enabled={settings.hass_enabled}
             onToggle={() => setSettings({ ...settings, hass_enabled: !settings.hass_enabled })}
@@ -926,10 +949,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         className={`overflow-hidden rounded-xl border ${!settings.n8n_enabled ? 'opacity-60' : ''}`}
       >
         <div className="bg-muted/50 flex items-center justify-between border-b px-4 py-3">
-          <div className="flex items-center gap-2">
-            <GitBranch className="h-5 w-5 text-pink-500" weight="fill" />
-            <span className="font-semibold">n8n</span>
-          </div>
+          <span className="font-semibold">n8n</span>
           <Toggle
             enabled={settings.n8n_enabled}
             onToggle={() => setSettings({ ...settings, n8n_enabled: !settings.n8n_enabled })}
