@@ -346,6 +346,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Get runtime settings (from settings.json with .env fallback)
     runtime = get_runtime_settings()
 
+    # Set GROQ_API_KEY env var for plugins that read from environment
+    if runtime.get("groq_api_key"):
+        os.environ["GROQ_API_KEY"] = runtime["groq_api_key"]
+
     # Create CAALLLM instance (provider-agnostic wrapper)
     caal_llm = CAALLLM.from_settings(runtime)
 
