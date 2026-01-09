@@ -137,9 +137,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         return data.groq_api_key && data.groq_model;
       }
     }
-    // Step 2 (TTS) - kokoro is always valid, piper is disabled
+    // Step 2 (TTS) - both providers valid if voice selected
     if (step === 2) {
-      return data.tts_provider === 'kokoro';
+      if (data.tts_provider === 'piper') {
+        return !!data.tts_voice_piper;
+      }
+      return !!data.tts_voice_kokoro;
     }
     return true;
   };
